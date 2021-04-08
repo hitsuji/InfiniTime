@@ -12,6 +12,7 @@
 #include "displayapp/screens/FirmwareValidation.h"
 #include "displayapp/screens/InfiniPaint.h"
 #include "displayapp/screens/Paddle.h"
+#include "displayapp/screens/StopWatch.h"
 #include "displayapp/screens/Meter.h"
 #include "displayapp/screens/Music.h"
 #include "displayapp/screens/Navigation.h"
@@ -25,13 +26,15 @@
 #include "systemtask/SystemTask.h"
 
 using namespace Pinetime::Applications;
+using namespace Pinetime::Applications::Display;
 
 DisplayApp::DisplayApp(Drivers::St7789 &lcd, Components::LittleVgl &lvgl, Drivers::Cst816S &touchPanel,
                        Controllers::Battery &batteryController, Controllers::Ble &bleController,
                        Controllers::DateTime &dateTimeController, Drivers::WatchdogView &watchdog,
                        System::SystemTask &systemTask,
                        Pinetime::Controllers::NotificationManager& notificationManager,
-                       Pinetime::Controllers::HeartRateController& heartRateController) :
+                       Pinetime::Controllers::HeartRateController& heartRateController,
+                       Controllers::Settings &settingsController) :
         lcd{lcd},
         lvgl{lvgl},
         batteryController{batteryController},
@@ -39,10 +42,11 @@ DisplayApp::DisplayApp(Drivers::St7789 &lcd, Components::LittleVgl &lvgl, Driver
         dateTimeController{dateTimeController},
         watchdog{watchdog},
         touchPanel{touchPanel},
-        currentScreen{new Screens::Clock(this, dateTimeController, batteryController, bleController, notificationManager, heartRateController) },
+        currentScreen{new Screens::Clock(this, dateTimeController, batteryController, bleController, notificationManager, settingsController, heartRateController) },
         systemTask{systemTask},
         notificationManager{notificationManager},
-        heartRateController{heartRateController} {
+        heartRateController{heartRateController},
+        settingsController{settingsController} {
   msgQueue = xQueueCreate(queueSize, itemSize);
   onClockApp = true;
 }
@@ -119,7 +123,7 @@ void DisplayApp::Refresh() {
           currentScreen.reset(nullptr);
           lvgl.SetFullRefresh(Components::LittleVgl::FullRefreshDirections::Up);
           onClockApp = false;
-          currentScreen.reset(new Screens::Notifications(this, notificationManager, systemTask.nimble().alertService(), Screens::Notifications::Modes::Preview));
+          currentScreen = std::make_unique<Screens::Notifications>(this, notificationManager, systemTask.nimble().alertService(), Screens::Notifications::Modes::Preview);
         }
       }
         break;
@@ -157,10 +161,10 @@ void DisplayApp::Refresh() {
 //        lvgl.SetFullRefresh(components::LittleVgl::FullRefreshDirections::Down);
 //        currentScreen.reset(nullptr);
 //        if(toggle) {
-//          currentScreen.reset(new Screens::Tile(this));
+//          currentScreen = std::make_unique<Screens::Tile>(this);
 //          toggle = false;
 //        } else {
-//          currentScreen.reset(new Screens::Clock(this, dateTimeController, batteryController, bleController));
+//          currentScreen = std::make_unique<Screens::Clock>(this, dateTimeController, batteryController, bleController);
 //          toggle = true;
 //        }
 
@@ -168,10 +172,14 @@ void DisplayApp::Refresh() {
       case Messages::BleFirmwareUpdateStarted:
         lvgl.SetFullRefresh(Components::LittleVgl::FullRefreshDirections::Down);
         currentScreen.reset(nullptr);
-        currentScreen.reset(new Screens::FirmwareUpdate(this, bleController));
+        currentScreen = std::make_unique<Screens::FirmwareUpdate>(this, bleController);
         onClockApp = false;
 
         break;
+       case Messages::UpdateDateTime:
+       // Added to remove warning
+       // What should happen here? 
+       break;
     }
   }
 
@@ -194,22 +202,23 @@ void DisplayApp::RunningState() {
     onClockApp = false;
     switch(nextApp) {
       case Apps::None:
-      case Apps::Launcher: currentScreen.reset(new Screens::ApplicationList(this)); break;
+      case Apps::Launcher: currentScreen = std::make_unique<Screens::ApplicationList>(this, settingsController); break;
       case Apps::Clock:
-        currentScreen.reset(new Screens::Clock(this, dateTimeController, batteryController, bleController, notificationManager, heartRateController));
+        currentScreen = std::make_unique<Screens::Clock>(this, dateTimeController, batteryController, bleController, notificationManager, settingsController, heartRateController);
         onClockApp = true;
         break;
-      case Apps::SysInfo: currentScreen.reset(new Screens::SystemInfo(this, dateTimeController, batteryController, brightnessController, bleController, watchdog)); break;
-      case Apps::Meter: currentScreen.reset(new Screens::Meter(this)); break;
-      case Apps::Twos: currentScreen.reset(new Screens::Twos(this)); break;
-      case Apps::Paint: currentScreen.reset(new Screens::InfiniPaint(this, lvgl)); break;
-      case Apps::Paddle: currentScreen.reset(new Screens::Paddle(this, lvgl)); break;
-      case Apps::Brightness : currentScreen.reset(new Screens::Brightness(this, brightnessController)); break;
-      case Apps::Music : currentScreen.reset(new Screens::Music(this, systemTask.nimble().music())); break;
-      case Apps::Navigation : currentScreen.reset(new Screens::Navigation(this, systemTask.nimble().navigation())); break;
-      case Apps::FirmwareValidation: currentScreen.reset(new Screens::FirmwareValidation(this, validator)); break;
-      case Apps::Notifications: currentScreen.reset(new Screens::Notifications(this, notificationManager, systemTask.nimble().alertService(), Screens::Notifications::Modes::Normal)); break;
-      case Apps::HeartRate: currentScreen.reset(new Screens::HeartRate(this, heartRateController)); break;
+      case Apps::SysInfo: currentScreen = std::make_unique<Screens::SystemInfo>(this, dateTimeController, batteryController, brightnessController, bleController, watchdog); break;
+      case Apps::Meter: currentScreen = std::make_unique<Screens::Meter>(this);break;
+      case Apps::StopWatch: currentScreen = std::make_unique<Screens::StopWatch>(this); break;
+      case Apps::Twos: currentScreen = std::make_unique<Screens::Twos>(this); break;
+      case Apps::Paint: currentScreen = std::make_unique<Screens::InfiniPaint>(this, lvgl); break;
+      case Apps::Paddle: currentScreen = std::make_unique<Screens::Paddle>(this, lvgl); break;
+      case Apps::Brightness : currentScreen = std::make_unique<Screens::Brightness>(this, brightnessController); break;
+      case Apps::Music : currentScreen = std::make_unique<Screens::Music>(this, systemTask.nimble().music()); break;
+      case Apps::Navigation : currentScreen = std::make_unique<Screens::Navigation>(this, systemTask.nimble().navigation()); break;
+      case Apps::FirmwareValidation: currentScreen = std::make_unique<Screens::FirmwareValidation>(this, validator); break;
+      case Apps::Notifications: currentScreen = std::make_unique<Screens::Notifications>(this, notificationManager, systemTask.nimble().alertService(), Screens::Notifications::Modes::Normal); break;
+      case Apps::HeartRate: currentScreen = std::make_unique<Screens::HeartRate>(this, heartRateController); break;
     }
     nextApp = Apps::None;
   }
@@ -220,7 +229,7 @@ void DisplayApp::IdleState() {
 
 }
 
-void DisplayApp::PushMessage(DisplayApp::Messages msg) {
+void DisplayApp::PushMessage(Messages msg) {
   BaseType_t xHigherPriorityTaskWoken;
   xHigherPriorityTaskWoken = pdFALSE;
   xQueueSendFromISR(msgQueue, &msg, &xHigherPriorityTaskWoken);
